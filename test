@@ -1,0 +1,136 @@
+# backend/app.py
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import requests
+import sqlite3
+from web3 import Web3
+
+app = Flask(__name__)
+CORS(app)
+
+# Подключение к Ethereum (Infura, Alchemy или локальный узел)
+w3 = Web3(Web3.HTTPProvider('https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID'))
+
+# Функция получения курса валют
+def get_exchange_rate(base, target):
+    url = f'https://api.exchangerate-api.com/v4/latest/{base}'
+    response = requests.get(url).json()
+    return response['rates'].get(target, None)
+
+# Эндпоинт для конвертации валют
+@app.route('/convert', methods=['GET'])
+def convert_currency():
+    base = request.args.get('base')
+    target = request.args.get('target')
+    amount = float(request.args.get('amount'))
+    rate = get_exchange_rate(base, target)
+    if rate:
+        return jsonify({'converted_amount': amount * rate})
+    return jsonify({'error': 'Invalid currency'}), 400
+
+# Эндпоинт для привязки кошелька
+@app.route('/wallet/connect', methods=['POST'])
+def connect_wallet():
+    data = request.json
+    address = data.get('address')
+    if w3.is_address(address):
+        return jsonify({'message': 'Wallet connected', 'address': address})
+    return jsonify({'error': 'Invalid wallet address'}), 400
+
+# Фронтенд (React)
+frontend_code = """
+import React, { useState } from 'react';
+
+function WalletConnect() {
+    const [walletAddress, setWalletAddress] = useState('');
+
+    const connectWallet = async () => {
+        if (window.ethereum) {
+            try {
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                setWalletAddress(accounts[0]);
+                await fetch('http://localhost:5000/wallet/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address: accounts[0] })
+                });
+            } catch (error) {
+                console.error(error);
+            }
+        } else {
+            alert('Please install MetaMask');
+        }
+    };
+
+    return (
+        <div>
+            <button onClick={connectWallet}>Connect Wallet</button>
+            {walletAddress && <p>Connected: {walletAddress}</p>}
+        </div>
+    );
+}
+
+export default WalletConnect;
+
+function CurrencyConverter() {
+    const [baseCurrency, setBaseCurrency] = useState('USD');
+    const [targetCurrency, setTargetCurrency] = useState('EUR');
+    const [amount, setAmount] = useState(1);
+    const [convertedAmount, setConvertedAmount] = useState(null);
+
+    const convertCurrency = async () => {
+        const response = await fetch(`http://localhost:5000/convert?base=${baseCurrency}&target=${targetCurrency}&amount=${amount}`);
+        const data = await response.json();
+        if (data.converted_amount) {
+            setConvertedAmount(data.converted_amount);
+        }
+    };
+
+    return (
+        <div>
+            <h2>Currency Converter</h2>
+            <input type="text" value={baseCurrency} onChange={(e) => setBaseCurrency(e.target.value)} />
+            <input type="text" value={targetCurrency} onChange={(e) => setTargetCurrency(e.target.value)} />
+            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <button onClick={convertCurrency}>Convert</button>
+            {convertedAmount && <p>Converted Amount: {convertedAmount}</p>}
+        </div>
+    );
+}
+
+export default CurrencyConverter;
+
+function UserProfile() {
+    const [user, setUser] = useState(null);
+
+    const fetchUserProfile = async () => {
+        const response = await fetch('http://localhost:5000/user/profile');
+        const data = await response.json();
+        setUser(data);
+    };
+
+    return (
+        <div>
+            <h2>User Profile</h2>
+            <button onClick={fetchUserProfile}>Load Profile</button>
+            {user && (
+                <div>
+                    <p>Name: {user.name}</p>
+                    <p>Email: {user.email}</p>
+                    <p>Wallet: {user.wallet}</p>
+                </div>
+            )}
+        </div>
+    );
+}
+
+export default UserProfile;
+"""
+
+# Эндпоинт для получения профиля пользователя
+@app.route('/user/profile', methods=['GET'])
+def user_profile():
+    return jsonify({'name': 'John Doe', 'email': 'john.doe@example.com', 'wallet': '0x123456789abcdef'})
+
+if __name__ == '__main__':
+    app.run(debug=True)
